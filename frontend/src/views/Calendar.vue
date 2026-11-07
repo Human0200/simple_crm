@@ -35,24 +35,33 @@
           class="task-row"
           @click="openTaskId = t.id"
         >
-          <span class="status-dot" :class="t.status"></span>
+          <span class="status-dot"></span>
           <span class="task-title">{{ t.title }}</span>
-          <span class="task-status">{{ statusLabel(t.status) }}</span>
+          <span class="task-status">{{ stageLabel(t) }}</span>
         </div>
       </div>
     </div>
 
-    <TaskModal v-if="openTaskId" :taskId="openTaskId" @close="openTaskId = null" @updated="refresh" />
+    <TaskModal
+      v-if="openTaskId"
+      :taskId="openTaskId"
+      :stages="stages"
+      @close="openTaskId = null"
+      @updated="refresh"
+      @deleted="onTaskDeleted"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import { listTasks, STATUSES } from "../api/tasks";
+import { listTasks } from "../api/tasks";
+import { listStages } from "../api/stages";
 import { onTaskEvent } from "../realtime";
 import TaskModal from "../components/TaskModal.vue";
 
 const tasks = ref([]);
+const stages = ref([]);
 const viewDate = ref(new Date());
 const today = new Date();
 const todayIso = toIso(today);
@@ -68,12 +77,20 @@ function toIso(date) {
   return `${y}-${m}-${d}`;
 }
 
-function statusLabel(value) {
-  return STATUSES.find((s) => s.value === value)?.label || value;
+function stageLabel(task) {
+  if (task.stage?.name) return task.stage.name;
+  return stages.value.find((s) => s.key === task.status || s.id === task.stage_id)?.name || task.status;
+}
+
+function onTaskDeleted() {
+  openTaskId.value = null;
+  refresh();
 }
 
 async function refresh() {
-  tasks.value = await listTasks();
+  const [t, s] = await Promise.all([listTasks(), listStages()]);
+  tasks.value = t;
+  stages.value = s;
 }
 
 let unsubscribeRealtime = null;

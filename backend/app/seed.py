@@ -1,6 +1,7 @@
 """Создаёт 5 рабочих аккаунтов при первом запуске (если пользователей ещё нет)."""
 
-from .database import SessionLocal, engine, Base
+from .migrate import migrate
+from .database import SessionLocal
 from . import models
 from .auth import hash_password
 
@@ -14,7 +15,7 @@ DEFAULT_ACCOUNTS = [
 
 
 def seed():
-    Base.metadata.create_all(bind=engine)
+    migrate()
     db = SessionLocal()
     try:
         if db.query(models.User).count() > 0:
@@ -26,6 +27,7 @@ def seed():
                     full_name=full_name,
                     password_hash=hash_password(password),
                     is_admin=(username == "user1"),
+                    email="",
                 )
             )
         db.commit()

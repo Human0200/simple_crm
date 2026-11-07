@@ -46,6 +46,11 @@
         </div>
 
         <div class="field">
+          <label class="field-label" for="email">Email</label>
+          <input id="email" v-model="email" type="email" class="field-value" placeholder="name@company.com" />
+        </div>
+
+        <div class="field">
           <label class="field-label" for="bio">О себе</label>
           <textarea
             id="bio"
@@ -75,6 +80,7 @@ import Avatar from "../components/Avatar.vue";
 
 const auth = useAuthStore();
 const fullName = ref(auth.user.full_name);
+const email = ref(auth.user.email || "");
 const bio = ref(auth.user.bio || "");
 const profileLoading = ref(false);
 const profileError = ref("");
@@ -85,6 +91,7 @@ const avatarError = ref("");
 onMounted(async () => {
   await auth.refreshUser();
   fullName.value = auth.user.full_name;
+  email.value = auth.user.email || "";
   bio.value = auth.user.bio || "";
 });
 
@@ -107,7 +114,7 @@ async function saveProfile() {
   }
   profileLoading.value = true;
   try {
-    const updated = await updateProfile(fullName.value, bio.value);
+    const updated = await updateProfile(fullName.value, bio.value, email.value);
     auth.setUser(updated);
     saved.value = true;
   } catch (e) {

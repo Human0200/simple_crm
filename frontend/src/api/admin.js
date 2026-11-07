@@ -49,3 +49,69 @@ export function createPermission(fromTeamId, toTeamId) {
 export function deletePermission(id) {
   return client.delete(`/admin/permissions/${id}`);
 }
+
+export function listFunnelPermissions() {
+  return client.get("/admin/funnel-permissions").then((r) => r.data);
+}
+
+export function createFunnelPermission(teamId, funnelId) {
+  return client
+    .post("/admin/funnel-permissions", { team_id: teamId, funnel_id: funnelId })
+    .then((r) => r.data);
+}
+
+export function deleteFunnelPermission(id) {
+  return client.delete(`/admin/funnel-permissions/${id}`);
+}
+
+export function listRolePermissions() {
+  return client.get("/admin/role-permissions").then((r) => r.data);
+}
+
+export function updateRolePermission(role, payload) {
+  return client.put(`/admin/role-permissions/${role}`, payload).then((r) => r.data);
+}
+
+export function getEmailSettings() {
+  return client.get("/admin/email").then((r) => r.data);
+}
+
+export function saveEmailSettings(payload) {
+  return client.put("/admin/email", payload).then((r) => r.data);
+}
+
+export function testEmail(toEmail) {
+  return client.post("/admin/email/test", { to_email: toEmail }).then((r) => r.data);
+}
+
+export function listAutomationRules() {
+  return client.get("/admin/automation").then((r) => r.data);
+}
+
+export function createAutomationRule(payload) {
+  return client.post("/admin/automation", payload).then((r) => r.data);
+}
+
+export function updateAutomationRule(id, payload) {
+  return client.put(`/admin/automation/${id}`, payload).then((r) => r.data);
+}
+
+export function deleteAutomationRule(id) {
+  return client.delete(`/admin/automation/${id}`);
+}
+
+export function listApiTokens() {
+  return client.get("/admin/api-tokens").then((r) => r.data);
+}
+
+export function createApiToken(payload) {
+  return client.post("/admin/api-tokens", payload).then((r) => r.data);
+}
+
+export function revokeApiToken(id) {
+  return client.post(`/admin/api-tokens/${id}/revoke`).then((r) => r.data);
+}
+
+export function deleteApiToken(id) {
+  return client.delete(`/admin/api-tokens/${id}`);
+}

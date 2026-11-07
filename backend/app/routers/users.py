@@ -1,3 +1,4 @@
+import os
 import uuid
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from ..permissions import assignable_users, observable_users
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
-AVATAR_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "avatars"
+STATIC_ROOT = Path(os.getenv("STATIC_DIR", Path(__file__).resolve().parent.parent.parent / "static"))
+AVATAR_DIR = STATIC_ROOT / "avatars"
 AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 MAX_AVATAR_BYTES = 3 * 1024 * 1024
@@ -59,6 +61,7 @@ def update_profile(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Имя не может быть пустым")
     current_user.full_name = full_name
     current_user.bio = payload.bio.strip()
+    current_user.email = (payload.email or "").strip()
     db.commit()
     db.refresh(current_user)
     return current_user

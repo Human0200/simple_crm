@@ -5,6 +5,7 @@ import Board from "./views/Board.vue";
 import Profile from "./views/Profile.vue";
 import Calendar from "./views/Calendar.vue";
 import Admin from "./views/Admin.vue";
+import Clients from "./views/Clients.vue";
 
 const routes = [
   { path: "/login", name: "login", component: Login, meta: { title: "Вход" } },
@@ -25,6 +26,12 @@ const routes = [
     name: "calendar",
     component: Calendar,
     meta: { requiresAuth: true, title: "Календарь" },
+  },
+  {
+    path: "/clients",
+    name: "clients",
+    component: Clients,
+    meta: { requiresAuth: true, title: "Клиенты" },
   },
   {
     path: "/admin",

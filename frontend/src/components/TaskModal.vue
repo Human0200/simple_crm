@@ -4,15 +4,32 @@
       <div class="modal-header">
         <h2>{{ task.title }}</h2>
         <div class="header-actions">
-          <button v-if="isCreator" type="button" class="btn secondary edit-btn" @click="$emit('edit', task)">
+          <button v-if="canEdit" type="button" class="btn secondary edit-btn" @click="$emit('edit', task)">
             Редактировать
+          </button>
+          <button
+            v-if="canDelete"
+            type="button"
+            class="btn secondary danger-btn"
+            :disabled="deleteLoading"
+            @click="removeTask"
+          >
+            {{ deleteLoading ? "Удаление…" : "Удалить" }}
           </button>
           <button class="close-btn" @click="$emit('close')" aria-label="Закрыть">×</button>
         </div>
       </div>
 
+      <p v-if="deleteError" class="error-text">{{ deleteError }}</p>
       <p class="description">{{ task.description || "Без описания" }}</p>
       <p v-if="task.due_date" class="due-date">Срок: {{ formatDueDate(task.due_date) }}</p>
+      <p v-if="task.client" class="client-line">
+        Клиент:
+        <router-link :to="{ name: 'clients' }" class="client-link" @click.stop>
+          {{ task.client.name }}
+        </router-link>
+        <span v-if="task.client.company" class="muted"> · {{ task.client.company }}</span>
+      </p>
 
       <div class="people">
         <div class="people-row">
@@ -36,22 +53,22 @@
 
         <div v-if="canChangeStatus" class="status-buttons">
           <button
-            v-for="s in STATUSES"
-            :key="s.value"
+            v-for="s in stages"
+            :key="s.id"
             type="button"
             class="status-btn"
-            :class="{ active: task.status === s.value }"
-            :disabled="!isStatusSelectable(s.value) || statusLoading"
-            :title="!isStatusSelectable(s.value) ? 'Только постановщик может перевести задачу в этот статус' : ''"
-            @click="pickStatus(s.value)"
+            :class="{ active: task.stage_id === s.id }"
+            :disabled="!isStageSelectable(s) || statusLoading"
+            :title="!isStageSelectable(s) ? 'Исполнитель не может перевести задачу в эту стадию' : ''"
+            @click="pickStage(s)"
           >
-            {{ s.label }}
+            {{ s.name }}
           </button>
         </div>
-        <div v-else class="current-status-badge">{{ statusLabel(task.status) }}</div>
+        <div v-else class="current-status-badge">{{ stageLabel(task) }}</div>
 
-        <p v-if="canChangeStatus && !lastCommentIsResult" class="result-hint">
-          Чтобы перевести задачу в «На проверку» или «Готово», отметьте последний комментарий как результат.
+        <p v-if="canChangeStatus && needsResultHint" class="result-hint">
+          Для перевода в стадию с требованием результата отметьте последний комментарий как результат.
         </p>
         <p v-if="statusError" class="error-text">{{ statusError }}</p>
       </div>
@@ -62,22 +79,42 @@
             type="button"
             class="tab"
             :class="{ active: activeTab === 'comments' }"
-            @click="activeTab = 'comments'"
+            @click="selectTab('comments')"
           >
             Комментарии
+            <span v-if="unread.comments" class="tab-badge">{{ unread.comments }}</span>
           </button>
           <button
             type="button"
             class="tab"
             :class="{ active: activeTab === 'results' }"
-            @click="activeTab = 'results'"
+            @click="selectTab('results')"
           >
             Результаты
             <span v-if="resultComments.length" class="tab-count">{{ resultComments.length }}</span>
+            <span v-if="unread.results" class="tab-badge">{{ unread.results }}</span>
+          </button>
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: activeTab === 'timeline' }"
+            @click="selectTab('timeline')"
+          >
+            Таймлайн
+            <span v-if="unread.timeline" class="tab-badge">{{ unread.timeline }}</span>
+          </button>
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: activeTab === 'email' }"
+            @click="selectTab('email')"
+          >
+            Почта
+            <span v-if="unread.email" class="tab-badge">{{ unread.email }}</span>
           </button>
         </div>
 
-        <div class="comments">
+        <div v-if="activeTab === 'comments' || activeTab === 'results'" class="comments">
           <div
             v-for="c in visibleComments"
             :key="c.id"
@@ -112,7 +149,11 @@
           </p>
         </div>
 
-        <form v-if="activeTab === 'comments'" class="new-comment" @submit.prevent="submitComment">
+        <form
+          v-if="activeTab === 'comments'"
+          class="new-comment"
+          @submit.prevent="submitComment"
+        >
           <textarea
             v-model="commentText"
             rows="2"
@@ -125,6 +166,97 @@
           </label>
           <button class="btn" type="submit" :disabled="commentLoading">Отправить</button>
         </form>
+
+        <div v-if="activeTab === 'timeline'" class="timeline">
+          <div v-for="ev in timelineEvents" :key="ev.id" class="timeline-item" :class="ev.event_type">
+            <div class="timeline-dot"></div>
+            <div class="timeline-body">
+              <div class="timeline-head">
+                <strong>{{ ev.title }}</strong>
+                <span class="time">{{ formatDate(ev.created_at) }}</span>
+              </div>
+              <div class="timeline-meta">
+                <span class="event-type">{{ eventTypeLabel(ev.event_type) }}</span>
+                <span v-if="ev.actor"> · {{ ev.actor.full_name }}</span>
+              </div>
+              <div v-if="ev.detail" class="timeline-detail">{{ ev.detail }}</div>
+            </div>
+          </div>
+          <p v-if="timelineEvents.length === 0" class="muted">Событий пока нет</p>
+        </div>
+
+        <div v-if="activeTab === 'email'" class="email-panel">
+          <p v-if="!task.client" class="result-hint">
+            К задаче не привязан клиент — укажите получателя вручную. История переписки с клиентом
+            появится после привязки.
+          </p>
+          <p v-else-if="!task.client.email" class="result-hint">
+            У клиента «{{ task.client.name }}» не указан email — заполните карточку клиента.
+          </p>
+
+          <div class="mail-thread">
+            <div class="section-title">Переписка по задаче</div>
+            <MailLoading v-if="mailThreadLoading" />
+            <template v-else>
+              <div
+                v-for="m in mailThread"
+                :key="m.id"
+                class="mail-bubble"
+                :class="m.direction"
+              >
+                <div class="mail-meta">
+                  <strong>{{ m.direction === 'inbound' ? 'Клиент' : (m.actor?.full_name || 'Исходящее') }}</strong>
+                  <span class="muted">{{ formatDate(m.created_at) }}</span>
+                </div>
+                <div class="mail-subject">{{ m.subject || "Без темы" }}</div>
+                <div class="mail-from muted small">
+                  {{ m.direction === 'inbound' ? `От: ${m.from_addr}` : `Кому: ${(m.to_addrs || []).join(", ")}` }}
+                </div>
+                <MailBody :body="m.body" />
+              </div>
+              <p v-if="mailThread.length === 0" class="muted">Писем по этой задаче пока нет</p>
+            </template>
+          </div>
+
+          <p v-if="!emailConfigured" class="result-hint">
+            Почтовая интеграция не настроена. Администратор может включить её в разделе «Почта».
+          </p>
+          <template v-else>
+            <form class="email-form" @submit.prevent="submitEmail">
+              <label>
+                Кому
+                <input v-model="emailTo" type="text" placeholder="a@x.com, b@y.com" required />
+              </label>
+              <div class="quick-emails" v-if="suggestedEmails.length">
+                <button
+                  v-for="addr in suggestedEmails"
+                  :key="addr"
+                  type="button"
+                  class="chip-btn"
+                  @click="addRecipient(addr)"
+                >
+                  {{ addr }}
+                </button>
+              </div>
+              <label>
+                Копия
+                <input v-model="emailCc" type="text" placeholder="опционально" />
+              </label>
+              <label>
+                Тема
+                <input v-model="emailSubject" type="text" required />
+              </label>
+              <label>
+                Текст
+                <textarea v-model="emailBody" rows="5" required></textarea>
+              </label>
+              <p v-if="emailError" class="error-text">{{ emailError }}</p>
+              <button class="btn" type="submit" :disabled="emailLoading">
+                {{ emailLoading ? "Отправка..." : "Отправить письмо" }}
+              </button>
+            </form>
+          </template>
+        </div>
       </div>
     </div>
   </div>
@@ -132,34 +264,83 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
-import { getTask, addComment, setCommentResult, changeStatus, STATUSES } from "../api/tasks";
+import {
+  getTask,
+  addComment,
+  setCommentResult,
+  changeStatus,
+  sendTaskEmail,
+  listTaskEmails,
+  getEmailStatus,
+  deleteTask,
+} from "../api/tasks";
+import { listStages } from "../api/stages";
 import { onTaskEvent } from "../realtime";
 import { useAuthStore } from "../stores/auth";
+import { useUnreadStore } from "../stores/unread";
+import MailBody from "./MailBody.vue";
+import MailLoading from "./MailLoading.vue";
 
 const props = defineProps({
   taskId: { type: Number, required: true },
+  stages: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["close", "updated", "edit"]);
+const emit = defineEmits(["close", "updated", "edit", "deleted"]);
 
 const auth = useAuthStore();
+const unreadStore = useUnreadStore();
 const task = ref(null);
 const commentText = ref("");
 const commentIsResult = ref(false);
 const commentLoading = ref(false);
 const statusError = ref("");
 const statusLoading = ref(false);
+const deleteLoading = ref(false);
+const deleteError = ref("");
 const activeTab = ref("comments");
+const emailConfigured = ref(false);
+const emailTo = ref("");
+const emailCc = ref("");
+const emailSubject = ref("");
+const emailBody = ref("");
+const emailLoading = ref(false);
+const emailError = ref("");
+const mailThread = ref([]);
+const mailThreadLoading = ref(false);
 
-const ASSIGNEE_ALLOWED_STATUSES = ["backlog", "in_progress", "review"];
-const REQUIRES_RESULT_STATUSES = ["review", "done"];
+const localStages = ref([]);
+const stages = computed(() => (props.stages?.length ? props.stages : localStages.value));
+
+const EVENT_LABELS = {
+  created: "создание",
+  updated: "изменение",
+  status_changed: "статус",
+  commented: "комментарий",
+  email_sent: "почта",
+  email_received: "входящее",
+  automation: "автоматизация",
+  client_linked: "клиент",
+};
 
 const isCreator = computed(() => task.value && task.value.creator.id === auth.user.id);
+const caps = computed(() => auth.capabilities);
+const canEdit = computed(() => {
+  if (!task.value) return false;
+  if (auth.user.is_admin || caps.value.can_edit_any) return true;
+  return isCreator.value && caps.value.can_edit;
+});
+const canDelete = computed(() => {
+  if (!task.value) return false;
+  if (auth.user.is_admin || caps.value.can_delete_any) return true;
+  return isCreator.value && caps.value.can_delete;
+});
 
 const canChangeStatus = computed(() => {
   if (!task.value) return false;
   const uid = auth.user.id;
   return (
     task.value.creator.id === uid ||
+    auth.user.is_admin ||
     task.value.assignees.some((u) => u.id === uid)
   );
 });
@@ -169,9 +350,14 @@ const lastCommentIsResult = computed(() => {
   return task.value.comments[task.value.comments.length - 1].is_result;
 });
 
-function isStatusSelectable(value) {
-  if (isCreator.value) return true;
-  return ASSIGNEE_ALLOWED_STATUSES.includes(value);
+const needsResultHint = computed(() => {
+  if (lastCommentIsResult.value) return false;
+  return stages.value.some((s) => s.requires_result);
+});
+
+function isStageSelectable(stage) {
+  if (isCreator.value || auth.user.is_admin) return true;
+  return !!stage.assignee_can_set;
 }
 
 const resultComments = computed(() =>
@@ -182,13 +368,61 @@ const visibleComments = computed(() =>
   activeTab.value === "results" ? resultComments.value : task.value?.comments || []
 );
 
+const timelineEvents = computed(() => {
+  const events = task.value?.timeline || [];
+  return [...events].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+});
+
+const suggestedEmails = computed(() => {
+  if (!task.value) return [];
+  const set = new Set();
+  if (task.value.client?.email) set.add(task.value.client.email);
+  const people = [task.value.creator, ...task.value.assignees, ...task.value.observers];
+  for (const u of people) {
+    if (u.email) set.add(u.email);
+  }
+  return [...set];
+});
+
+const unread = computed(() => {
+  if (task.value?.unread) return task.value.unread;
+  return unreadStore.forTask(props.taskId);
+});
+
+async function selectTab(tab) {
+  activeTab.value = tab;
+  if (unread.value?.[tab] > 0) {
+    try {
+      const counts = await unreadStore.markRead(props.taskId, [tab]);
+      if (task.value) task.value.unread = counts;
+      emit("updated", task.value);
+    } catch {
+      // ignore
+    }
+  }
+  if (tab === "email") {
+    initEmailDraft();
+    loadMailThread();
+  }
+}
+
 function canMarkResult(comment) {
   if (!task.value || comment.is_status_change) return false;
   return comment.author.id === auth.user.id || isCreator.value;
 }
 
 function statusLabel(value) {
-  return STATUSES.find((s) => s.value === value)?.label || value;
+  const stage = stages.value.find((s) => s.key === value || s.id === value);
+  return stage?.name || value;
+}
+
+function stageLabel(t) {
+  if (t.stage?.name) return t.stage.name;
+  return statusLabel(t.status);
+}
+
+function eventTypeLabel(type) {
+  return EVENT_LABELS[type] || type;
 }
 
 function userLabel(user) {
@@ -204,27 +438,118 @@ function formatDueDate(isoDate) {
   return new Date(isoDate).toLocaleDateString("ru-RU");
 }
 
+function splitEmails(raw) {
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function addRecipient(addr) {
+  const current = splitEmails(emailTo.value);
+  if (!current.includes(addr)) {
+    emailTo.value = [...current, addr].join(", ");
+  }
+}
+
+function initEmailDraft() {
+  if (!task.value) return;
+  emailSubject.value = `Задача #${task.value.id}: ${task.value.title}`;
+  emailBody.value =
+    `Здравствуйте!\n\nПо задаче «${task.value.title}»:\n` +
+    `${task.value.description || "—"}\n\n` +
+      `Стадия: ${stageLabel(task.value)}\n`;
+  const clientEmail = task.value.client?.email || "";
+  emailTo.value = clientEmail || suggestedEmails.value[0] || emailTo.value || "";
+}
+
+async function loadMailThread() {
+  mailThreadLoading.value = true;
+  try {
+    mailThread.value = await listTaskEmails(props.taskId);
+  } catch {
+    mailThread.value = [];
+  } finally {
+    mailThreadLoading.value = false;
+  }
+}
+
 async function load() {
   task.value = await getTask(props.taskId);
+  if (task.value?.unread) {
+    unreadStore.applyTaskUnread(props.taskId, task.value.unread);
+  }
+  // при открытии помечаем активную вкладку прочитанной
+  await selectTab(activeTab.value);
 }
+
+async function ensureStages() {
+  if (!props.value.length) {
+    try {
+      localStages.value = await listStages();
+    } catch {
+      localStages.value = [];
+    }
+  }
+}
+
 load();
+ensureStages();
+getEmailStatus()
+  .then((s) => {
+    emailConfigured.value = !!s.configured;
+  })
+  .catch(() => {
+    emailConfigured.value = false;
+  });
 
 watch(
   () => props.taskId,
-  () => load()
+  () => {
+    activeTab.value = "comments";
+    load();
+  }
 );
 
 let unsubscribeRealtime = null;
 onMounted(() => {
   unsubscribeRealtime = onTaskEvent((event) => {
     if (event.task_id === props.taskId) {
+      if (event.type === "task_deleted") {
+        emit("deleted", props.taskId);
+        emit("close");
+        unreadStore.refresh();
+        return;
+      }
       load();
+      if (event.type === "email_received" && activeTab.value === "email") {
+        loadMailThread();
+      }
+    } else {
+      unreadStore.refresh();
     }
   });
 });
 onUnmounted(() => {
   unsubscribeRealtime?.();
 });
+
+async function removeTask() {
+  if (!task.value) return;
+  if (!confirm(`Удалить задачу «${task.value.title}»?`)) return;
+  deleteLoading.value = true;
+  deleteError.value = "";
+  try {
+    await deleteTask(props.taskId);
+    emit("deleted", props.taskId);
+    emit("close");
+    unreadStore.refresh();
+  } catch (e) {
+    deleteError.value = e.response?.data?.detail || "Не удалось удалить задачу";
+  } finally {
+    deleteLoading.value = false;
+  }
+}
 
 async function submitComment() {
   commentLoading.value = true;
@@ -243,21 +568,42 @@ async function toggleResult(comment) {
   emit("updated", task.value);
 }
 
-async function pickStatus(value) {
-  if (value === task.value.status) return;
+async function pickStage(stage) {
+  if (stage.id === task.value.stage_id) return;
   statusError.value = "";
-  if (REQUIRES_RESULT_STATUSES.includes(value) && !lastCommentIsResult.value) {
-    statusError.value = `Чтобы перевести задачу в «${statusLabel(value)}», отметьте последний комментарий как результат`;
+  if (stage.requires_result && !lastCommentIsResult.value) {
+    statusError.value = `Чтобы перевести задачу в «${stage.name}», отметьте последний комментарий как результат`;
     return;
   }
   statusLoading.value = true;
   try {
-    task.value = await changeStatus(props.taskId, value);
+    task.value = await changeStatus(props.taskId, stage.id);
     emit("updated", task.value);
   } catch (e) {
-    statusError.value = e.response?.data?.detail || "Не удалось изменить статус";
+    statusError.value = e.response?.data?.detail || "Не удалось изменить стадию";
   } finally {
     statusLoading.value = false;
+  }
+}
+
+async function submitEmail() {
+  emailError.value = "";
+  emailLoading.value = true;
+  try {
+    task.value = await sendTaskEmail(props.taskId, {
+      to_emails: splitEmails(emailTo.value),
+      cc_emails: splitEmails(emailCc.value),
+      subject: emailSubject.value,
+      body: emailBody.value,
+    });
+    emailBody.value = "";
+    await loadMailThread();
+    emit("updated", task.value);
+    activeTab.value = "timeline";
+  } catch (e) {
+    emailError.value = e.response?.data?.detail || "Не удалось отправить письмо";
+  } finally {
+    emailLoading.value = false;
   }
 }
 </script>
@@ -278,7 +624,7 @@ async function pickStatus(value) {
   background: var(--surface);
   border-radius: 10px;
   padding: 28px;
-  width: 560px;
+  width: 620px;
   max-height: 88vh;
   overflow-y: auto;
   display: flex;
@@ -306,9 +652,19 @@ h2 {
   flex-shrink: 0;
 }
 
-.edit-btn {
+.edit-btn,
+.danger-btn {
   font-size: 12px;
   padding: 6px 10px;
+}
+
+.danger-btn {
+  color: #b42318;
+  border-color: #f3c0bc;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background: #fef3f2;
 }
 
 .close-btn {
@@ -339,6 +695,21 @@ h2 {
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
+}
+
+.client-line {
+  margin: -8px 0 0;
+  font-size: 13px;
+}
+
+.client-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.client-link:hover {
+  text-decoration: underline;
 }
 
 .people {
@@ -460,6 +831,7 @@ h2 {
   gap: 4px;
   border-bottom: 1px solid var(--border);
   margin-bottom: -2px;
+  flex-wrap: wrap;
 }
 
 .tab {
@@ -485,6 +857,20 @@ h2 {
   border-radius: 10px;
   padding: 0 7px;
   font-size: 11px;
+}
+
+.tab-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #de350b;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .comments {
@@ -582,6 +968,180 @@ h2 {
 }
 
 .new-comment .btn {
+  align-self: flex-end;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-left: 6px;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 10px;
+  position: relative;
+  padding-bottom: 14px;
+}
+
+.timeline-item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary);
+  margin-top: 4px;
+  z-index: 1;
+}
+
+.timeline-item.email_sent .timeline-dot {
+  background: #00875a;
+}
+
+.timeline-item.automation .timeline-dot {
+  background: #6554c0;
+}
+
+.timeline-item.status_changed .timeline-dot {
+  background: #ff8b00;
+}
+
+.timeline-body {
+  font-size: 13px;
+}
+
+.timeline-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.timeline-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.event-type {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.timeline-detail {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  color: var(--text);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.email-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.email-form input,
+.email-form textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.quick-emails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-btn {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.chip-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.mail-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.mail-bubble {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.mail-bubble.outbound {
+  border-left: 3px solid #2563eb;
+}
+
+.mail-bubble.inbound {
+  border-left: 3px solid #16a34a;
+  background: #f0fdf4;
+}
+
+.mail-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.mail-subject {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.mail-body {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.email-form .btn {
   align-self: flex-end;
 }
 </style>

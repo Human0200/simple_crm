@@ -21,6 +21,16 @@
         <input id="due_date" v-model="dueDate" type="date" />
       </div>
 
+      <div class="field">
+        <label for="client">Клиент (необязательно)</label>
+        <select id="client" v-model="clientId">
+          <option value="">Без клиента</option>
+          <option v-for="c in clients" :key="c.id" :value="c.id">
+            {{ c.name }}<template v-if="c.company"> — {{ c.company }}</template>
+          </option>
+        </select>
+      </div>
+
       <div v-if="auth.user.is_admin" class="field">
         <label for="creator">Постановщик</label>
         <p class="hint">Админ может указать любого пользователя как постановщика задачи</p>
@@ -83,7 +93,9 @@ const props = defineProps({
   users: { type: Array, required: true },
   assignableUsers: { type: Array, required: true },
   allUsers: { type: Array, default: () => [] },
+  clients: { type: Array, default: () => [] },
   task: { type: Object, default: null },
+  funnelId: { type: Number, default: null },
 });
 const emit = defineEmits(["close", "created", "saved"]);
 
@@ -94,6 +106,7 @@ const isEdit = computed(() => !!props.task);
 const title = ref(props.task?.title || "");
 const description = ref(props.task?.description || "");
 const dueDate = ref(props.task?.due_date || "");
+const clientId = ref(props.task?.client?.id ?? "");
 const creatorId = ref(props.task?.creator?.id || auth.user.id);
 const assigneeIds = ref(props.task ? props.task.assignees.map((u) => u.id) : []);
 const observerIds = ref(props.task ? props.task.observers.map((u) => u.id) : []);
@@ -114,9 +127,13 @@ async function submit() {
     due_date: dueDate.value || null,
     assignee_ids: assigneeIds.value,
     observer_ids: observerIds.value,
+    client_id: clientId.value === "" || clientId.value == null ? null : Number(clientId.value),
   };
   if (auth.user.is_admin && !isEdit.value) {
     payload.creator_id = creatorId.value;
+  }
+  if (!isEdit.value && props.funnelId) {
+    payload.funnel_id = props.funnelId;
   }
   try {
     if (isEdit.value) {

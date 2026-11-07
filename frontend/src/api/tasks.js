@@ -1,5 +1,6 @@
 import client from "./client";
 
+/** @deprecated используйте listStages(); оставлено для совместимости */
 export const STATUSES = [
   { value: "backlog", label: "К выполнению" },
   { value: "in_progress", label: "В работе" },
@@ -23,6 +24,10 @@ export function updateTask(id, payload) {
   return client.put(`/tasks/${id}`, payload).then((r) => r.data);
 }
 
+export function deleteTask(id) {
+  return client.delete(`/tasks/${id}`);
+}
+
 export function addComment(id, text, isResult = false) {
   return client
     .post(`/tasks/${id}/comments`, { text, is_result: isResult })
@@ -35,10 +40,32 @@ export function setCommentResult(taskId, commentId, isResult) {
     .then((r) => r.data);
 }
 
-export const REQUIRES_RESULT_STATUSES = ["review", "done"];
+export function changeStatus(id, stageIdOrKey) {
+  const payload =
+    typeof stageIdOrKey === "number"
+      ? { stage_id: stageIdOrKey }
+      : { status: stageIdOrKey };
+  return client.patch(`/tasks/${id}/status`, payload).then((r) => r.data);
+}
 
-export function changeStatus(id, status) {
-  return client.patch(`/tasks/${id}/status`, { status }).then((r) => r.data);
+export function sendTaskEmail(id, payload) {
+  return client.post(`/tasks/${id}/email`, payload).then((r) => r.data);
+}
+
+export function listTaskEmails(id) {
+  return client.get(`/tasks/${id}/emails`).then((r) => r.data);
+}
+
+export function getEmailStatus() {
+  return client.get("/email/status").then((r) => r.data);
+}
+
+export function fetchUnreadSummary() {
+  return client.get("/tasks/unread").then((r) => r.data);
+}
+
+export function markTaskRead(taskId, tabs) {
+  return client.post(`/tasks/${taskId}/read`, { tabs }).then((r) => r.data);
 }
 
 export function listUsers() {

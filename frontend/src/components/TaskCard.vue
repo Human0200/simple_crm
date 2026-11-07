@@ -6,7 +6,9 @@
     @click="$emit('open', task.id)"
     @dragstart="onDragStart"
   >
+    <span v-if="unreadTotal > 0" class="unread-badge">{{ unreadTotal > 99 ? "99+" : unreadTotal }}</span>
     <div class="title">{{ task.title }}</div>
+    <div v-if="task.client" class="client-tag">{{ task.client.name }}</div>
     <div v-if="task.description" class="description">{{ task.description }}</div>
 
     <div class="footer">
@@ -33,13 +35,22 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
 import Avatar from "./Avatar.vue";
+import { useUnreadStore } from "../stores/unread";
 
 const props = defineProps({
   task: { type: Object, required: true },
   canDrag: { type: Boolean, default: false },
 });
 const emit = defineEmits(["open", "drag"]);
+const unreadStore = useUnreadStore();
+
+const unreadTotal = computed(() => {
+  const fromStore = unreadStore.forTask(props.task.id)?.total || 0;
+  const fromTask = props.task.unread?.total || 0;
+  return Math.max(fromStore, fromTask);
+});
 
 function onDragStart(e) {
   e.dataTransfer.effectAllowed = "move";
@@ -58,7 +69,19 @@ function userLabel(user) {
 </script>
 
 <style scoped>
+.client-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #403294;
+  background: #eae6ff;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-top: 2px;
+}
+
 .task-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -66,6 +89,9 @@ function userLabel(user) {
   margin-bottom: 8px;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(9, 30, 66, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .task-card:hover {
@@ -80,9 +106,28 @@ function userLabel(user) {
   cursor: grabbing;
 }
 
+.unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #de350b;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
 .title {
   font-size: 14px;
   margin-bottom: 4px;
+  padding-right: 12px;
 }
 
 .description {

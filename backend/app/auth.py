@@ -1,19 +1,25 @@
+import hashlib
+import os
+import secrets
 from datetime import datetime, timedelta
+from typing import Optional
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from . import models
 from .database import get_db
 
-SECRET_KEY = "dev-secret-key-change-me"
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+api_bearer = HTTPBearer(auto_error=False)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -62,3 +68,53 @@ def get_current_admin(
             detail="Доступно только администратору",
         )
     return current_user
+
+
+def hash_api_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def generate_api_token() -> str:
+    return "scrm_" + secrets.token_urlsafe(32)
+
+
+def get_api_actor(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(api_bearer),
+    api_key: Optional[str] = Security(api_key_header),
+    db: Session = Depends(get_db),
+) -> models.User:
+    """Аутентификация внешнего API по Bearer или X-API-Key."""
+    raw = None
+    if credentials and credentials.credentials:
+        raw = credentials.credentials.strip()
+    elif api_key:
+        raw = api_key.strip()
+
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Укажите API-токен (Authorization: Bearer … или X-API-Key)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = (
+        db.query(models.ApiToken)
+        .options(joinedload(models.ApiToken.actor_user))
+        .filter(
+            models.ApiToken.token_hash == hash_api_token(raw),
+            models.ApiToken.enabled.is_(True),
+            models.ApiToken.revoked_at.is_(None),
+        )
+        .first()
+    )
+    if token is None or token.actor_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Недействительный API-токен",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token.last_used_at = datetime.utcnow()
+    db.add(token)
+    db.commit()
+    return token.actor_user

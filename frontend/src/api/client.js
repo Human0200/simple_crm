@@ -1,7 +1,12 @@
 import axios from "axios";
 
+// Пустая строка = same-origin (Docker/nginx). Иначе localhost:8000 для Vite-dev.
+const raw = import.meta.env.VITE_API_ORIGIN;
+export const API_ORIGIN =
+  raw === undefined || raw === null ? "http://localhost:8000" : String(raw).replace(/\/$/, "");
+
 const client = axios.create({
-  baseURL: "http://localhost:8000/api",
+  baseURL: API_ORIGIN ? `${API_ORIGIN}/api` : "/api",
 });
 
 client.interceptors.request.use((config) => {

@@ -1,6 +1,13 @@
 import { useAuthStore } from "./stores/auth";
+import { API_ORIGIN } from "./api/client";
 
-const WS_URL = "ws://localhost:8000/ws";
+function wsBase() {
+  if (API_ORIGIN) {
+    return API_ORIGIN.replace(/^http/, "ws");
+  }
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${window.location.host}`;
+}
 
 let socket = null;
 const listeners = new Set();
@@ -23,7 +30,7 @@ export function connectRealtime() {
   const auth = useAuthStore();
   if (!auth.token || socket) return;
 
-  socket = new WebSocket(`${WS_URL}?token=${encodeURIComponent(auth.token)}`);
+  socket = new WebSocket(`${wsBase()}/ws?token=${encodeURIComponent(auth.token)}`);
 
   socket.onmessage = (event) => {
     let data;

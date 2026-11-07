@@ -1,0 +1,7 @@
+venv
+__pycache__
+*.pyc
+.pytest_cache
+crm.db
+static/avatars/*
+*.md

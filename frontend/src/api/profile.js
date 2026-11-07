@@ -1,9 +1,9 @@
-import client from "./client";
+import client, { API_ORIGIN } from "./client";
 
-export const API_ORIGIN = "http://localhost:8000";
-
-export function updateProfile(fullName, bio) {
-  return client.patch("/users/me", { full_name: fullName, bio }).then((r) => r.data);
+export function updateProfile(fullName, bio, email = "") {
+  return client
+    .patch("/users/me", { full_name: fullName, bio, email })
+    .then((r) => r.data);
 }
 
 export function uploadAvatar(file) {
@@ -18,5 +18,5 @@ export function uploadAvatar(file) {
 
 export function avatarUrl(user) {
   if (!user?.avatar_url) return null;
-  return API_ORIGIN + user.avatar_url;
+  return API_ORIGIN ? API_ORIGIN + user.avatar_url : user.avatar_url;
 }
