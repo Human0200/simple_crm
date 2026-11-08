@@ -60,6 +60,10 @@ export function getEmailStatus() {
   return client.get("/email/status").then((r) => r.data);
 }
 
+export function listMessageTemplates() {
+  return client.get("/email/templates").then((r) => r.data);
+}
+
 export function fetchUnreadSummary() {
   return client.get("/tasks/unread").then((r) => r.data);
 }

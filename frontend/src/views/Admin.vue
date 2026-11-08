@@ -39,17 +39,12 @@
             <td class="muted">{{ u.username }}</td>
             <td class="muted">{{ u.email || "—" }}</td>
             <td>
-              <span v-if="u.teams.length === 0" class="muted">—</span>
+              <span v-if="!u.teams?.length" class="muted">—</span>
               <span v-for="t in u.teams" :key="t.id" class="chip">{{ t.name }}</span>
             </td>
-            <td>
-              <select :value="u.role" @change="onRoleChange(u, $event)">
-                <option value="creator">Может ставить задачи</option>
-                <option value="executor">Исполнитель</option>
-                <option value="observer">Наблюдатель</option>
-              </select>
-            </td>
-            <td>
+            <td>{{ roleLabel(u.role) }}</td>
+            <td class="rule-actions">
+              <button type="button" class="link-btn" @click="openEditUser(u)">Изменить</button>
               <button
                 v-if="!u.is_admin"
                 type="button"
@@ -63,15 +58,63 @@
         </tbody>
       </table>
 
-      <form class="inline-form" @submit.prevent="submitNewUser">
-        <input v-model="newUser.username" type="text" placeholder="Логин" required />
-        <input v-model="newUser.full_name" type="text" placeholder="Имя" required />
-        <input v-model="newUser.email" type="email" placeholder="Email" />
-        <input v-model="newUser.password" type="password" placeholder="Пароль" required />
-        <button class="btn" type="submit" :disabled="newUserLoading">Создать пользователя</button>
-      </form>
-      <p v-if="newUserError" class="error-text">{{ newUserError }}</p>
+      <div class="inline-form" style="margin: 12px 0 4px">
+        <button type="button" class="btn" @click="openCreateUser">Создать пользователя</button>
+      </div>
       <p v-if="userActionError" class="error-text">{{ userActionError }}</p>
+
+      <div v-if="showUserModal" class="overlay" @click.self="closeUserModal">
+        <div class="rule-modal">
+          <h3>{{ editingUserId ? "Редактирование пользователя" : "Новый пользователь" }}</h3>
+          <form class="stack-form" @submit.prevent="submitUserForm">
+            <label>
+              Логин
+              <input v-model="userForm.username" type="text" required autocomplete="off" />
+            </label>
+            <label>
+              Пароль
+              <input
+                v-model="userForm.password"
+                type="password"
+                :required="!editingUserId"
+                autocomplete="new-password"
+                :placeholder="editingUserId ? 'Оставьте пустым, чтобы не менять' : ''"
+              />
+            </label>
+            <label>
+              Имя
+              <input v-model="userForm.full_name" type="text" required />
+            </label>
+            <label>
+              Email
+              <input v-model="userForm.email" type="email" />
+            </label>
+            <label>
+              О себе
+              <textarea v-model="userForm.bio" rows="3"></textarea>
+            </label>
+            <label>
+              Роль
+              <select v-model="userForm.role">
+                <option value="creator">Может ставить задачи</option>
+                <option value="executor">Исполнитель</option>
+                <option value="observer">Наблюдатель</option>
+              </select>
+            </label>
+            <label class="checkbox-row">
+              <input v-model="userForm.is_admin" type="checkbox" />
+              Администратор
+            </label>
+            <div class="inline-form">
+              <button class="btn" type="submit" :disabled="userFormLoading">
+                {{ editingUserId ? "Сохранить" : "Создать" }}
+              </button>
+              <button type="button" class="btn secondary" @click="closeUserModal">Отмена</button>
+            </div>
+            <p v-if="userFormError" class="error-text">{{ userFormError }}</p>
+          </form>
+        </div>
+      </div>
     </section>
 
     <section v-if="activeSection === 'teams'" class="card">
@@ -352,6 +395,7 @@
           </template>
           <template v-else>
             · «{{ rule.title_template }}»
+            <span v-if="rule.target_stage_id"> → {{ stageName(rule.target_stage_id) }}</span>
           </template>
           <span v-if="rule.last_run_at"> · последний запуск {{ formatDate(rule.last_run_at) }}</span>
         </div>
@@ -380,12 +424,15 @@
 
         <h4 class="form-section-title">Триггер</h4>
         <label>
-          Воронка
+          Воронка триггера
           <select v-model="ruleForm.funnel_id">
             <option v-for="f in funnels" :key="f.id" :value="f.id">{{ f.name }}</option>
           </select>
         </label>
-        <p class="hint">Стадии в полях ниже берутся только из выбранной воронки.</p>
+        <p class="hint">
+          Стадии триггера и условий — из этой воронки.
+          Стадию новой задачи / куда переместить можно выбрать в другой воронке ниже.
+        </p>
         <label>
           Когда срабатывает
           <select v-model="ruleForm.trigger_type">
@@ -410,7 +457,7 @@
             </select>
           </label>
           <label>
-            Время (UTC, ЧЧ:ММ)
+            Время (МСК, ЧЧ:ММ)
             <input v-model="ruleForm.schedule_time" pattern="[0-9]{2}:[0-9]{2}" placeholder="09:00" required />
           </label>
           <label v-if="ruleForm.schedule_interval === 'weekly'">
@@ -493,12 +540,21 @@
 
         <template v-if="ruleForm.action_type === 'create_task'">
           <label>
-            Стадия новой задачи (необязательно)
-            <select v-model="ruleForm.target_stage_id">
-              <option value="">По умолчанию</option>
-              <option v-for="s in ruleStages" :key="s.id" :value="s.id">{{ s.name }}</option>
+            Воронка новой задачи
+            <select v-model="ruleForm.target_funnel_id">
+              <option v-for="f in funnels" :key="f.id" :value="f.id">{{ f.name }}</option>
             </select>
           </label>
+          <label>
+            Стадия новой задачи
+            <select v-model="ruleForm.target_stage_id">
+              <option value="">Первая стадия воронки / по умолчанию</option>
+              <option v-for="s in actionStages" :key="s.id" :value="s.id">{{ s.name }}</option>
+            </select>
+          </label>
+          <p class="hint">
+            Например: триггер на воронке «Лиды», а задача создаётся на «Программисты → К выполнению».
+          </p>
           <label>
             Шаблон названия задачи
             <input v-model="ruleForm.title_template" required />
@@ -572,15 +628,21 @@
             </select>
           </label>
           <label>
-            Со стадии
+            Со стадии (воронка триггера)
             <select v-model.number="ruleForm.move_from_stage_id" required>
               <option v-for="s in ruleStages" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
           </label>
           <label>
+            Воронка назначения
+            <select v-model="ruleForm.target_funnel_id">
+              <option v-for="f in funnels" :key="f.id" :value="f.id">{{ f.name }}</option>
+            </select>
+          </label>
+          <label>
             На стадию
             <select v-model.number="ruleForm.target_stage_id" required>
-              <option v-for="s in ruleStages" :key="s.id" :value="s.id">{{ s.name }}</option>
+              <option v-for="s in actionStages" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
           </label>
           <label>
@@ -607,6 +669,64 @@
         </div>
         <p v-if="ruleError" class="error-text">{{ ruleError }}</p>
       </form>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="activeSection === 'templates'" class="card">
+      <h2>Шаблоны писем</h2>
+      <p class="hint">
+        Шаблоны подставляются при отправке письма из задачи.
+        Плейсхолдеры:
+        <code>{date}</code>, <code>{source_title}</code>, <code>{source_id}</code>,
+        <code>{source_stage}</code>, <code>{client_name}</code>, <code>{client_company}</code>,
+        <code>{client_id}</code>, <code>{client_email}</code>, <code>{client_phone}</code>,
+        <code>{notes}</code>.
+      </p>
+
+      <div v-for="t in messageTemplates" :key="t.id" class="rule-block">
+        <div class="rule-header">
+          <div>
+            <strong>{{ t.name }}</strong>
+            <div class="rule-meta">Тема: {{ t.subject_template || "—" }}</div>
+          </div>
+          <div class="rule-actions">
+            <button type="button" class="link-btn" @click="editMessageTemplate(t)">Изменить</button>
+            <button type="button" class="link-btn danger" @click="removeMessageTemplate(t)">Удалить</button>
+          </div>
+        </div>
+      </div>
+      <p v-if="messageTemplates.length === 0" class="muted">Шаблонов пока нет</p>
+
+      <div class="inline-form" style="margin: 12px 0 4px">
+        <button type="button" class="btn" @click="openCreateMessageTemplate">Создать шаблон</button>
+      </div>
+      <p v-if="templateError" class="error-text">{{ templateError }}</p>
+
+      <div v-if="showTemplateModal" class="overlay" @click.self="closeTemplateModal">
+        <div class="rule-modal">
+          <h3>{{ editingTemplateId ? "Редактирование шаблона" : "Новый шаблон" }}</h3>
+          <form class="stack-form" @submit.prevent="submitMessageTemplate">
+            <label>
+              Название
+              <input v-model="templateForm.name" required />
+            </label>
+            <label>
+              Тема письма
+              <input v-model="templateForm.subject_template" placeholder="например Автоматизация ваших бизнес-процессов" />
+            </label>
+            <label>
+              Текст письма
+              <textarea v-model="templateForm.body_template" rows="8" placeholder="Можно оставить пустым"></textarea>
+            </label>
+            <div class="inline-form">
+              <button class="btn" type="submit" :disabled="templateLoading">
+                {{ editingTemplateId ? "Сохранить" : "Создать" }}
+              </button>
+              <button type="button" class="btn secondary" @click="closeTemplateModal">Отмена</button>
+            </div>
+            <p v-if="templateFormError" class="error-text">{{ templateFormError }}</p>
+          </form>
         </div>
       </div>
     </section>
@@ -826,8 +946,8 @@ import Avatar from "../components/Avatar.vue";
 import {
   listAllUsers,
   createUser,
+  updateUser,
   deleteUser,
-  updateUserRole,
   listTeams,
   createTeam,
   deleteTeam,
@@ -852,6 +972,10 @@ import {
   createApiToken,
   revokeApiToken,
   deleteApiToken,
+  listMessageTemplates,
+  createMessageTemplate,
+  updateMessageTemplate,
+  deleteMessageTemplate,
 } from "../api/admin";
 import { listStages, createStage, updateStage, deleteStage, reorderStages } from "../api/stages";
 import {
@@ -869,6 +993,7 @@ const tabs = [
   { id: "permissions", label: "Права" },
   { id: "stages", label: "Воронки" },
   { id: "automation", label: "Автоматизация" },
+  { id: "templates", label: "Шаблоны писем" },
   { id: "api", label: "API" },
   { id: "email", label: "Почта" },
 ];
@@ -905,6 +1030,17 @@ const createdTokenValue = ref("");
 const tokenLoading = ref(false);
 const tokenError = ref("");
 const tokenForm = reactive({ name: "", actor_user_id: null });
+const messageTemplates = ref([]);
+const showTemplateModal = ref(false);
+const editingTemplateId = ref(null);
+const templateLoading = ref(false);
+const templateError = ref("");
+const templateFormError = ref("");
+const templateForm = reactive({
+  name: "",
+  subject_template: "",
+  body_template: "",
+});
 const emailSettings = ref({ configured: false, has_password: false });
 const newStageName = ref("");
 const stageError = ref("");
@@ -1160,10 +1296,20 @@ const funnelStages = computed(() => {
   return [...(f.stages || [])].sort((a, b) => a.position - b.position || a.id - b.id);
 });
 
-const newUser = reactive({ username: "", full_name: "", email: "", password: "" });
-const newUserLoading = ref(false);
-const newUserError = ref("");
+const showUserModal = ref(false);
+const editingUserId = ref(null);
+const userFormLoading = ref(false);
+const userFormError = ref("");
 const userActionError = ref("");
+const userForm = reactive({
+  username: "",
+  password: "",
+  full_name: "",
+  email: "",
+  bio: "",
+  role: "creator",
+  is_admin: false,
+});
 
 const newTeamName = ref("");
 const newTeamLoading = ref(false);
@@ -1203,10 +1349,23 @@ const ruleForm = reactive({
   observer_ids: [],
   due_offset_days: "",
   funnel_id: "",
+  target_funnel_id: "",
 });
 
 const ruleStages = computed(() => {
   const fid = ruleForm.funnel_id ? Number(ruleForm.funnel_id) : null;
+  const list = fid
+    ? stages.value.filter((s) => s.funnel_id === fid)
+    : stages.value;
+  return [...list].sort((a, b) => a.position - b.position || a.id - b.id);
+});
+
+const actionStages = computed(() => {
+  const fid = ruleForm.target_funnel_id
+    ? Number(ruleForm.target_funnel_id)
+    : ruleForm.funnel_id
+      ? Number(ruleForm.funnel_id)
+      : null;
   const list = fid
     ? stages.value.filter((s) => s.funnel_id === fid)
     : stages.value;
@@ -1253,7 +1412,6 @@ function syncRuleStagesToFunnel() {
   const list = ruleStages.value;
   const ids = new Set(list.map((s) => s.id));
   const first = list[0]?.id || "";
-  const second = list[1]?.id || first;
 
   if (ruleForm.watch_from_stage_id && !ids.has(Number(ruleForm.watch_from_stage_id))) {
     ruleForm.watch_from_stage_id = "";
@@ -1264,17 +1422,25 @@ function syncRuleStagesToFunnel() {
   if (!ruleForm.condition_stage_id || !ids.has(Number(ruleForm.condition_stage_id))) {
     ruleForm.condition_stage_id = first;
   }
-  if (ruleForm.target_stage_id && !ids.has(Number(ruleForm.target_stage_id))) {
-    ruleForm.target_stage_id =
-      ruleForm.action_type === "move_tasks" ? second || first : "";
-  }
-  if (ruleForm.action_type === "move_tasks") {
-    if (!ruleForm.target_stage_id) ruleForm.target_stage_id = second || first;
-    if (!ruleForm.move_from_stage_id || !ids.has(Number(ruleForm.move_from_stage_id))) {
-      ruleForm.move_from_stage_id = first;
-    }
-  } else if (!ruleForm.move_from_stage_id || !ids.has(Number(ruleForm.move_from_stage_id))) {
+  if (!ruleForm.move_from_stage_id || !ids.has(Number(ruleForm.move_from_stage_id))) {
     ruleForm.move_from_stage_id = first;
+  }
+}
+
+function syncActionStagesToTargetFunnel() {
+  const list = actionStages.value;
+  const ids = new Set(list.map((s) => s.id));
+  const first = list[0]?.id || "";
+  const second = list[1]?.id || first;
+
+  if (ruleForm.action_type === "move_tasks") {
+    if (!ruleForm.target_stage_id || !ids.has(Number(ruleForm.target_stage_id))) {
+      ruleForm.target_stage_id = second || first;
+    }
+  } else if (ruleForm.action_type === "create_task") {
+    if (ruleForm.target_stage_id && !ids.has(Number(ruleForm.target_stage_id))) {
+      ruleForm.target_stage_id = first;
+    }
   }
 }
 
@@ -1287,6 +1453,7 @@ function emptyRuleForm() {
   ruleForm.schedule_time = "09:00";
   ruleForm.schedule_weekday = 0;
   ruleForm.funnel_id = defaultRuleFunnelId();
+  ruleForm.target_funnel_id = ruleForm.funnel_id;
   const list = ruleStages.value;
   const first = list[0]?.id || "";
   const second = list[1]?.id || first;
@@ -1297,7 +1464,7 @@ function emptyRuleForm() {
   ruleForm.condition_stage_id = first;
   ruleForm.condition_client_id = "";
   ruleForm.condition_no_tasks = false;
-  ruleForm.target_stage_id = second;
+  ruleForm.target_stage_id = first;
   ruleForm.move_from_stage_id = first;
   ruleForm.move_scope = "trigger_task";
   ruleForm.email_to_template = "{client_email}";
@@ -1334,15 +1501,16 @@ function editRule(rule) {
     rule.trigger_type === "client_no_stage_task" ? "schedule" : rule.trigger_type;
   ruleForm.action_type = rule.action_type || "create_task";
   ruleForm.schedule_interval = rule.schedule_interval || "daily";
-  ruleForm.schedule_time = rule.schedule_time || "09:00";
+  ruleForm.schedule_time = utcToMsk(rule.schedule_time || "06:00");
   ruleForm.schedule_weekday = rule.schedule_weekday ?? 0;
   ruleForm.funnel_id = funnelIdFromStageIds(
     rule.watch_to_stage_id,
     rule.watch_from_stage_id,
     rule.move_from_stage_id,
-    rule.target_stage_id,
     rule.condition_stage_id
   );
+  ruleForm.target_funnel_id =
+    funnelIdFromStageIds(rule.target_stage_id) || ruleForm.funnel_id;
   ruleForm.watch_from_stage_id = rule.watch_from_stage_id || "";
   ruleForm.watch_to_stage_id = rule.watch_to_stage_id || "";
   ruleForm.inactivity_days = rule.inactivity_days || 30;
@@ -1363,6 +1531,7 @@ function editRule(rule) {
   ruleForm.observer_ids = [...(rule.observer_ids || [])];
   ruleForm.due_offset_days = rule.due_offset_days ?? "";
   syncRuleStagesToFunnel();
+  syncActionStagesToTargetFunnel();
   activeSection.value = "automation";
 }
 
@@ -1374,6 +1543,25 @@ watch(
   }
 );
 
+watch(
+  () => ruleForm.target_funnel_id,
+  (id, prev) => {
+    if (!id || id === prev) return;
+    syncActionStagesToTargetFunnel();
+  }
+);
+
+watch(
+  () => ruleForm.action_type,
+  (type, prev) => {
+    if (!type || type === prev) return;
+    if (!ruleForm.target_funnel_id) {
+      ruleForm.target_funnel_id = ruleForm.funnel_id;
+    }
+    syncActionStagesToTargetFunnel();
+  }
+);
+
 function stageName(id) {
   const s = stages.value.find((x) => x.id === id);
   if (!s) return `#${id}`;
@@ -1381,12 +1569,29 @@ function stageName(id) {
   return funnel ? `${s.name} (${funnel.name})` : s.name;
 }
 
+/** В БД schedule_time хранится как UTC; в UI показываем/вводим МСК (UTC+3). */
+function shiftTimeHhMm(hhmm, hoursDelta) {
+  const raw = String(hhmm || "09:00").trim();
+  const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return "09:00";
+  let h = Number(m[1]) + hoursDelta;
+  const min = Number(m[2]);
+  h = ((h % 24) + 24) % 24;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+function utcToMsk(hhmm) {
+  return shiftTimeHhMm(hhmm, 3);
+}
+function mskToUtc(hhmm) {
+  return shiftTimeHhMm(hhmm, -3);
+}
+
 function triggerLabel(rule) {
   const type =
     rule.trigger_type === "client_no_stage_task" ? "schedule" : rule.trigger_type;
   if (type === "schedule") {
     const interval = rule.schedule_interval === "weekly" ? "еженедельно" : "ежедневно";
-    return `${interval} в ${rule.schedule_time || "09:00"} UTC`;
+    return `${interval} в ${utcToMsk(rule.schedule_time || "06:00")} МСК`;
   }
   if (type === "client_inactive") {
     return `нет активности ${rule.inactivity_days || "?"} дн.`;
@@ -1447,7 +1652,10 @@ function buildRulePayload() {
     trigger_type: ruleForm.trigger_type,
     schedule_interval:
       ruleForm.trigger_type === "schedule" ? ruleForm.schedule_interval : null,
-    schedule_time: ruleForm.schedule_time,
+    schedule_time:
+      ruleForm.trigger_type === "schedule"
+        ? mskToUtc(ruleForm.schedule_time || "09:00")
+        : ruleForm.schedule_time || "09:00",
     schedule_weekday:
       ruleForm.trigger_type === "schedule" && ruleForm.schedule_interval === "weekly"
         ? Number(ruleForm.schedule_weekday)
@@ -1474,11 +1682,15 @@ function buildRulePayload() {
       : null,
     condition_no_tasks: Boolean(ruleForm.condition_no_tasks),
     action_type: ruleForm.action_type,
-    target_stage_id:
-      (ruleForm.action_type === "create_task" || ruleForm.action_type === "move_tasks") &&
-      ruleForm.target_stage_id
-        ? Number(ruleForm.target_stage_id)
-        : null,
+    target_stage_id: (() => {
+      if (ruleForm.action_type === "move_tasks") {
+        return ruleForm.target_stage_id ? Number(ruleForm.target_stage_id) : null;
+      }
+      if (ruleForm.action_type !== "create_task") return null;
+      if (ruleForm.target_stage_id) return Number(ruleForm.target_stage_id);
+      const first = actionStages.value[0]?.id;
+      return first ? Number(first) : null;
+    })(),
     move_from_stage_id:
       ruleForm.action_type === "move_tasks" && ruleForm.move_from_stage_id
         ? Number(ruleForm.move_from_stage_id)
@@ -1533,7 +1745,7 @@ async function saveRolePermission(rp) {
 }
 
 async function refreshAll() {
-  const [u, t, p, rules, email, st, cl, tokens, rp, fn, fp] = await Promise.all([
+  const [u, t, p, rules, email, st, cl, tokens, rp, fn, fp, tpls] = await Promise.all([
     listAllUsers(),
     listTeams(),
     listPermissions(),
@@ -1545,6 +1757,7 @@ async function refreshAll() {
     listRolePermissions(),
     listFunnels(),
     listFunnelPermissions(),
+    listMessageTemplates(),
   ]);
   users.value = u;
   teams.value = t;
@@ -1553,6 +1766,7 @@ async function refreshAll() {
   rolePermissions.value = rp;
   automationRules.value = rules;
   apiTokens.value = tokens;
+  messageTemplates.value = tpls;
   stages.value = st;
   funnels.value = fn;
   if (!selectedFunnelId.value || !fn.some((f) => f.id === selectedFunnelId.value)) {
@@ -1631,20 +1845,149 @@ function nonMembers(team) {
   return users.value.filter((u) => !memberIds.has(u.id));
 }
 
-async function submitNewUser() {
-  newUserError.value = "";
-  newUserLoading.value = true;
+function resetUserForm() {
+  editingUserId.value = null;
+  userForm.username = "";
+  userForm.password = "";
+  userForm.full_name = "";
+  userForm.email = "";
+  userForm.bio = "";
+  userForm.role = "creator";
+  userForm.is_admin = false;
+  userFormError.value = "";
+}
+
+function openCreateUser() {
+  resetUserForm();
+  showUserModal.value = true;
+}
+
+function openEditUser(u) {
+  editingUserId.value = u.id;
+  userForm.username = u.username || "";
+  userForm.password = "";
+  userForm.full_name = u.full_name || "";
+  userForm.email = u.email || "";
+  userForm.bio = u.bio || "";
+  userForm.role = u.role || "creator";
+  userForm.is_admin = !!u.is_admin;
+  userFormError.value = "";
+  showUserModal.value = true;
+}
+
+function closeUserModal() {
+  showUserModal.value = false;
+  resetUserForm();
+}
+
+async function submitUserForm() {
+  userFormError.value = "";
+  userActionError.value = "";
+  const username = userForm.username.trim();
+  const full_name = userForm.full_name.trim();
+  if (!username || !full_name) {
+    userFormError.value = "Логин и имя обязательны";
+    return;
+  }
+  if (!editingUserId.value && !userForm.password) {
+    userFormError.value = "Укажите пароль";
+    return;
+  }
+  userFormLoading.value = true;
   try {
-    await createUser({ ...newUser });
-    newUser.username = "";
-    newUser.full_name = "";
-    newUser.email = "";
-    newUser.password = "";
+    const payload = {
+      username,
+      full_name,
+      email: userForm.email.trim(),
+      bio: userForm.bio,
+      role: userForm.role,
+      is_admin: !!userForm.is_admin,
+    };
+    if (editingUserId.value) {
+      if (userForm.password) payload.password = userForm.password;
+      await updateUser(editingUserId.value, payload);
+    } else {
+      payload.password = userForm.password;
+      await createUser(payload);
+    }
+    closeUserModal();
     await refreshAll();
   } catch (e) {
-    newUserError.value = e.response?.data?.detail || "Не удалось создать пользователя";
+    userFormError.value =
+      e.response?.data?.detail ||
+      (editingUserId.value
+        ? "Не удалось сохранить пользователя"
+        : "Не удалось создать пользователя");
   } finally {
-    newUserLoading.value = false;
+    userFormLoading.value = false;
+  }
+}
+
+function resetTemplateForm() {
+  editingTemplateId.value = null;
+  templateForm.name = "";
+  templateForm.subject_template = "";
+  templateForm.body_template = "";
+  templateFormError.value = "";
+}
+
+function openCreateMessageTemplate() {
+  resetTemplateForm();
+  showTemplateModal.value = true;
+}
+
+function editMessageTemplate(t) {
+  editingTemplateId.value = t.id;
+  templateForm.name = t.name || "";
+  templateForm.subject_template = t.subject_template || "";
+  templateForm.body_template = t.body_template || "";
+  templateFormError.value = "";
+  showTemplateModal.value = true;
+}
+
+function closeTemplateModal() {
+  showTemplateModal.value = false;
+  resetTemplateForm();
+}
+
+async function submitMessageTemplate() {
+  templateFormError.value = "";
+  templateError.value = "";
+  const name = templateForm.name.trim();
+  if (!name) {
+    templateFormError.value = "Название обязательно";
+    return;
+  }
+  templateLoading.value = true;
+  try {
+    const payload = {
+      name,
+      subject_template: templateForm.subject_template,
+      body_template: templateForm.body_template,
+    };
+    if (editingTemplateId.value) {
+      await updateMessageTemplate(editingTemplateId.value, payload);
+    } else {
+      await createMessageTemplate(payload);
+    }
+    closeTemplateModal();
+    await refreshAll();
+  } catch (e) {
+    templateFormError.value =
+      e.response?.data?.detail || "Не удалось сохранить шаблон";
+  } finally {
+    templateLoading.value = false;
+  }
+}
+
+async function removeMessageTemplate(t) {
+  templateError.value = "";
+  if (!confirm(`Удалить шаблон «${t.name}»?`)) return;
+  try {
+    await deleteMessageTemplate(t.id);
+    await refreshAll();
+  } catch (e) {
+    templateError.value = e.response?.data?.detail || "Не удалось удалить шаблон";
   }
 }
 
@@ -1659,18 +2002,6 @@ async function submitNewTeam() {
     teamError.value = e.response?.data?.detail || "Не удалось создать команду";
   } finally {
     newTeamLoading.value = false;
-  }
-}
-
-async function onRoleChange(user, event) {
-  userActionError.value = "";
-  const role = event.target.value;
-  try {
-    await updateUserRole(user.id, role);
-    await refreshAll();
-  } catch (e) {
-    userActionError.value = e.response?.data?.detail || "Не удалось изменить роль";
-    event.target.value = user.role;
   }
 }
 

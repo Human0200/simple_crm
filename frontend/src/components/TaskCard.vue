@@ -14,20 +14,26 @@
     <div class="footer">
       <div class="meta">
         <Avatar :user="task.creator" :size="22" :title="'Постановщик: ' + userLabel(task.creator)" />
-        <Avatar
-          v-for="a in task.assignees"
-          :key="'a' + a.id"
-          :user="a"
-          :size="22"
-          :title="'Исполнитель: ' + userLabel(a)"
-        />
-        <Avatar
-          v-for="o in task.observers"
-          :key="'o' + o.id"
-          :user="o"
-          :size="22"
-          :title="'Наблюдатель: ' + userLabel(o)"
-        />
+        <template v-if="task.assignees?.length">
+          <span class="assign-arrow" title="поставил задачу →">→</span>
+          <Avatar
+            v-for="a in task.assignees"
+            :key="'a' + a.id"
+            :user="a"
+            :size="22"
+            :title="'Исполнитель: ' + userLabel(a)"
+          />
+        </template>
+        <template v-if="task.observers?.length">
+          <span v-if="task.assignees?.length" class="meta-sep" aria-hidden="true">·</span>
+          <Avatar
+            v-for="o in task.observers"
+            :key="'o' + o.id"
+            :user="o"
+            :size="22"
+            :title="'Наблюдатель: ' + userLabel(o)"
+          />
+        </template>
       </div>
       <span v-if="task.due_date" class="due-date">до {{ formatDueDate(task.due_date) }}</span>
     </div>
@@ -148,8 +154,24 @@ function userLabel(user) {
 
 .meta {
   display: flex;
+  align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.assign-arrow {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+.meta-sep {
+  color: var(--border);
+  font-size: 12px;
+  line-height: 1;
+  user-select: none;
 }
 
 .due-date {

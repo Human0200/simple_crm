@@ -116,6 +116,19 @@ class AdminUserCreate(BaseModel):
     full_name: str
     password: str
     email: str = ""
+    bio: str = ""
+    role: UserRole = UserRole.CREATOR
+    is_admin: bool = False
+
+
+class AdminUserUpdate(BaseModel):
+    username: str
+    full_name: str
+    email: str = ""
+    bio: str = ""
+    role: UserRole = UserRole.CREATOR
+    is_admin: bool = False
+    password: Optional[str] = None  # пусто / null = не менять
 
 
 class AdminUserRoleUpdate(BaseModel):
@@ -126,6 +139,23 @@ class ProfileUpdate(BaseModel):
     full_name: str
     bio: str = ""
     email: str = ""
+
+
+class MessageTemplateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    subject_template: str = ""
+    body_template: str = ""
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class MessageTemplateIn(BaseModel):
+    name: str
+    subject_template: str = ""
+    body_template: str = ""
 
 
 class Token(BaseModel):
@@ -233,6 +263,7 @@ class ClientBriefOut(BaseModel):
     company: str = ""
     email: str = ""
     phone: str = ""
+    notes: str = ""
 
 
 class ClientCreate(BaseModel):
@@ -357,6 +388,8 @@ class UnreadTaskItem(BaseModel):
     task_id: int
     title: str
     status: str
+    funnel_id: Optional[int] = None
+    stage_id: Optional[int] = None
     comments: int = 0
     results: int = 0
     timeline: int = 0

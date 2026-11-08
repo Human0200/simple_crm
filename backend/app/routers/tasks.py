@@ -98,6 +98,9 @@ def _can_view(task: models.Task, user: models.User) -> bool:
 
 
 def _can_change_status(task: models.Task, user: models.User) -> bool:
+    """Менять стадию: постановщик или исполнитель. Админ — без ограничений."""
+    if user.is_admin:
+        return True
     if task.creator_id == user.id:
         return True
     assignee_ids = {u.id for u in task.assignees}
@@ -105,7 +108,9 @@ def _can_change_status(task: models.Task, user: models.User) -> bool:
 
 
 def _can_set_stage(task: models.Task, user: models.User, target: models.Stage) -> bool:
-    if task.creator_id == user.id or user.is_admin:
+    """Ограничение стадий (assignee_can_set) — только для исполнителей.
+    Постановщик и админ могут в любую стадию."""
+    if user.is_admin or task.creator_id == user.id:
         return True
     assignee_ids = {u.id for u in task.assignees}
     if user.id not in assignee_ids:
@@ -466,7 +471,7 @@ async def change_status(
     if not _can_change_status(task, current_user):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Менять статус может только постановщик или исполнитель",
+            "Менять статус может только постановщик, исполнитель или администратор",
         )
 
     new_stage = None

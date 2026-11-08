@@ -457,6 +457,19 @@ class TaskReadState(Base):
     email_seen_at = Column(DateTime, nullable=True)
 
 
+class MessageTemplate(Base):
+    """Шаблоны писем с плейсхолдерами {client_name}, {source_title} и т.п."""
+
+    __tablename__ = "message_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    subject_template = Column(String, default="", nullable=False)
+    body_template = Column(Text, default="", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class EmailSettings(Base):
     __tablename__ = "email_settings"
 

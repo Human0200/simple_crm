@@ -129,6 +129,8 @@ def unread_summary_for_user(db: Session, user: models.User) -> list[dict]:
                 "task_id": task.id,
                 "title": task.title,
                 "status": task.stage.key if task.stage else str(task.status or ""),
+                "funnel_id": task.stage.funnel_id if task.stage else None,
+                "stage_id": task.stage_id or (task.stage.id if task.stage else None),
                 **counts,
             }
         )

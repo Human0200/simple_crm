@@ -11,6 +11,7 @@
           <span class="whoami">{{ auth.user.full_name }}</span>
         </router-link>
         <button class="btn secondary" @click="logout">Выйти</button>
+        <NotificationBell />
       </div>
     </header>
 
@@ -25,6 +26,9 @@
       >
         {{ f.name }}
         <span v-if="f.team" class="funnel-team">{{ f.team.name }}</span>
+        <span v-if="(unreadByFunnel[f.id] || 0) > 0" class="funnel-unread">
+          {{ unreadByFunnel[f.id] > 99 ? "99+" : unreadByFunnel[f.id] }}
+        </span>
       </button>
     </div>
 
@@ -122,6 +126,7 @@ import TaskCard from "../components/TaskCard.vue";
 import NewTaskModal from "../components/NewTaskModal.vue";
 import TaskModal from "../components/TaskModal.vue";
 import Avatar from "../components/Avatar.vue";
+import NotificationBell from "../components/NotificationBell.vue";
 
 const auth = useAuthStore();
 const unreadStore = useUnreadStore();
@@ -156,14 +161,31 @@ function tasksByStage(stageId) {
   return tasks.value.filter((t) => t.stage_id === stageId || t.stage?.id === stageId);
 }
 
+const unreadByFunnel = computed(() => {
+  const map = {};
+  for (const f of funnels.value) {
+    let total = unreadStore.forFunnel(f.id);
+    if (!total) {
+      total = (allTasks.value || []).reduce((sum, t) => {
+        if (Number(t.stage?.funnel_id) !== Number(f.id)) return sum;
+        return sum + (unreadStore.forTask(t.id)?.total || t.unread?.total || 0);
+      }, 0);
+    }
+    map[f.id] = total;
+  }
+  return map;
+});
+
 function canChangeStatus(task) {
   const uid = auth.user.id;
+  // админ может всегда; остальные — только постановщик или исполнитель
+  if (auth.user.is_admin) return true;
   return task.creator.id === uid || task.assignees.some((u) => u.id === uid);
 }
 
 function canSetStage(task, stage) {
   const uid = auth.user.id;
-  if (task.creator.id === uid || auth.user.is_admin) return true;
+  if (auth.user.is_admin || task.creator.id === uid) return true;
   if (!task.assignees.some((u) => u.id === uid)) return false;
   return !!stage.assignee_can_set;
 }
@@ -325,6 +347,7 @@ function logout() {
 }
 
 .funnel-tab {
+  position: relative;
   border: 1px solid var(--border);
   background: var(--bg);
   border-radius: 999px;
@@ -332,6 +355,9 @@ function logout() {
   font-size: 13px;
   cursor: pointer;
   color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .funnel-tab.active {
@@ -341,9 +367,27 @@ function logout() {
 }
 
 .funnel-team {
-  margin-left: 6px;
   opacity: 0.7;
   font-size: 11px;
+}
+
+.funnel-unread {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #de350b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.funnel-tab.active .funnel-unread {
+  background: #ff5630;
 }
 
 header {
@@ -351,7 +395,6 @@ header {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-  padding-right: 52px;
 }
 
 .toolbar {

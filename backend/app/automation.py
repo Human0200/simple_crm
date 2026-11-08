@@ -583,14 +583,14 @@ def run_status_change_rules(
         client = source_task.client
         if not client_passes_conditions(db, rule, client):
             continue
+        # Не вызываем _should_skip_client_fire: он блокирует правило, пока
+        # существует ранее созданная задача — для смены стадии это ломает
+        # повторные переходы (снова в «Готов сотрудничать» и т.п.).
         if client is not None:
-            if _should_skip_client_fire(db, rule, client.id, now):
-                continue
             task = _fire_for_client(
                 db, rule, client, now, source_task=source_task
             )
         else:
-            # условия без клиента не требуют client_id — просто действие
             if (
                 _wants_no_stage_task(rule)
                 or rule.condition_client_id

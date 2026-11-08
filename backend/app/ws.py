@@ -45,6 +45,10 @@ class ConnectionManager:
         }
         recipient_ids |= admin_ids
 
+        # Инициатору не шлём событие (и звук/бейдж у него не дергаются)
+        if actor_id is not None:
+            recipient_ids.discard(int(actor_id))
+
         message = {"type": event, "task_id": task.id, "actor_id": actor_id}
         for uid in recipient_ids:
             await self.send_to_user(uid, message)

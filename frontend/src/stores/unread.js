@@ -17,6 +17,14 @@ export const useUnreadStore = defineStore("unread", {
   }),
   getters: {
     forTask: (state) => (taskId) => state.byTask[taskId] || empty(),
+    forFunnel: (state) => (funnelId) => {
+      if (funnelId == null) return 0;
+      const fid = Number(funnelId);
+      return (state.items || []).reduce((sum, item) => {
+        if (Number(item.funnel_id) !== fid) return sum;
+        return sum + (item.total || 0);
+      }, 0);
+    },
   },
   actions: {
     applyTaskUnread(taskId, unread) {

@@ -8,6 +8,10 @@ export function createUser(payload) {
   return client.post("/admin/users", payload).then((r) => r.data);
 }
 
+export function updateUser(id, payload) {
+  return client.put(`/admin/users/${id}`, payload).then((r) => r.data);
+}
+
 export function deleteUser(id) {
   return client.delete(`/admin/users/${id}`);
 }
@@ -114,4 +118,20 @@ export function revokeApiToken(id) {
 
 export function deleteApiToken(id) {
   return client.delete(`/admin/api-tokens/${id}`);
+}
+
+export function listMessageTemplates() {
+  return client.get("/admin/message-templates").then((r) => r.data);
+}
+
+export function createMessageTemplate(payload) {
+  return client.post("/admin/message-templates", payload).then((r) => r.data);
+}
+
+export function updateMessageTemplate(id, payload) {
+  return client.put(`/admin/message-templates/${id}`, payload).then((r) => r.data);
+}
+
+export function deleteMessageTemplate(id) {
+  return client.delete(`/admin/message-templates/${id}`);
 }

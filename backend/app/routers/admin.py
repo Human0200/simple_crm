@@ -69,8 +69,61 @@ def create_user(
         full_name=full_name,
         password_hash=hash_password(payload.password),
         email=(payload.email or "").strip(),
+        bio=(payload.bio or "").strip(),
+        role=payload.role,
+        is_admin=bool(payload.is_admin),
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.put("/users/{user_id}", response_model=schemas.UserOut)
+def update_user(
+    user_id: int,
+    payload: schemas.AdminUserUpdate,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_current_admin),
+):
+    user = (
+        db.query(models.User)
+        .options(joinedload(models.User.teams))
+        .filter(models.User.id == user_id)
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+
+    username = payload.username.strip()
+    full_name = payload.full_name.strip()
+    if not username or not full_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Логин и имя обязательны")
+
+    taken = (
+        db.query(models.User)
+        .filter(models.User.username == username, models.User.id != user_id)
+        .first()
+    )
+    if taken:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Такой логин уже занят")
+
+    if user.id == admin.id and not payload.is_admin:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Нельзя снять права администратора у себя",
+        )
+
+    user.username = username
+    user.full_name = full_name
+    user.email = (payload.email or "").strip()
+    user.bio = (payload.bio or "").strip()
+    user.role = payload.role
+    user.is_admin = bool(payload.is_admin)
+
+    if payload.password is not None and payload.password.strip():
+        user.password_hash = hash_password(payload.password.strip())
+
     db.commit()
     db.refresh(user)
     return user
@@ -718,4 +771,83 @@ def delete_api_token(
     if token is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Токен не найден")
     db.delete(token)
+    db.commit()
+
+
+# --- Message templates ---
+
+
+@router.get("/message-templates", response_model=list[schemas.MessageTemplateOut])
+def list_message_templates_admin(
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_current_admin),
+):
+    return (
+        db.query(models.MessageTemplate)
+        .order_by(models.MessageTemplate.name, models.MessageTemplate.id)
+        .all()
+    )
+
+
+@router.post("/message-templates", response_model=schemas.MessageTemplateOut)
+def create_message_template(
+    payload: schemas.MessageTemplateIn,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_current_admin),
+):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Название шаблона обязательно")
+    row = models.MessageTemplate(
+        name=name,
+        subject_template=(payload.subject_template or "").strip(),
+        body_template=payload.body_template or "",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.put("/message-templates/{template_id}", response_model=schemas.MessageTemplateOut)
+def update_message_template(
+    template_id: int,
+    payload: schemas.MessageTemplateIn,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_current_admin),
+):
+    row = (
+        db.query(models.MessageTemplate)
+        .filter(models.MessageTemplate.id == template_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Название шаблона обязательно")
+    row.name = name
+    row.subject_template = (payload.subject_template or "").strip()
+    row.body_template = payload.body_template or ""
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete(
+    "/message-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_message_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_current_admin),
+):
+    row = (
+        db.query(models.MessageTemplate)
+        .filter(models.MessageTemplate.id == template_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон не найден")
+    db.delete(row)
     db.commit()

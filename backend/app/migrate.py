@@ -203,6 +203,7 @@ def migrate():
         ensure_role_permissions(db)
         _migrate_task_stages(db)
         _migrate_automation_stage_refs(db)
+        _ensure_default_message_templates(db)
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -229,3 +230,16 @@ def migrate():
             )
     finally:
         db.close()
+
+
+def _ensure_default_message_templates(db: Session):
+    if db.query(models.MessageTemplate).count() > 0:
+        return
+    db.add(
+        models.MessageTemplate(
+            name="Автоматизация бизнес-процессов",
+            subject_template="Автоматизация ваших бизнес-процессов",
+            body_template="",
+        )
+    )
+    db.commit()

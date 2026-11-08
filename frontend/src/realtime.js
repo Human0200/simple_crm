@@ -12,6 +12,51 @@ function wsBase() {
 let socket = null;
 const listeners = new Set();
 
+/** Один Audio: браузер блокирует play() без жеста; разблокируем на первый клик/клавишу. */
+let notifyAudio = null;
+let audioUnlocked = false;
+let unlockBound = false;
+
+function ensureNotifyAudio() {
+  if (!notifyAudio) {
+    notifyAudio = new Audio("/message.mp3");
+    notifyAudio.preload = "auto";
+  }
+  return notifyAudio;
+}
+
+function unlockNotificationAudio() {
+  if (audioUnlocked) return;
+  const audio = ensureNotifyAudio();
+  audio.muted = true;
+  const p = audio.play();
+  if (p && typeof p.then === "function") {
+    p.then(() => {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.muted = false;
+      audioUnlocked = true;
+    }).catch(() => {
+      audio.muted = false;
+    });
+  } else {
+    audio.muted = false;
+    audioUnlocked = true;
+  }
+}
+
+function bindAudioUnlock() {
+  if (unlockBound || typeof window === "undefined") return;
+  unlockBound = true;
+  const once = () => {
+    unlockNotificationAudio();
+    window.removeEventListener("pointerdown", once, true);
+    window.removeEventListener("keydown", once, true);
+  };
+  window.addEventListener("pointerdown", once, true);
+  window.addEventListener("keydown", once, true);
+}
+
 export function onTaskEvent(callback) {
   listeners.add(callback);
   return () => listeners.delete(callback);
@@ -19,16 +64,24 @@ export function onTaskEvent(callback) {
 
 function playNotificationSound() {
   try {
-    const audio = new Audio("/message.mp3");
-    audio.play().catch(() => {});
+    bindAudioUnlock();
+    const audio = ensureNotifyAudio();
+    audio.currentTime = 0;
+    audio.muted = false;
+    audio.play().catch(() => {
+      // ещё не разблокирован — следующий жест разблокирует
+    });
   } catch (e) {
-    // игнорируем — звук не критичен для работы приложения
+    // звук не критичен
   }
 }
 
 export function connectRealtime() {
   const auth = useAuthStore();
   if (!auth.token || socket) return;
+
+  bindAudioUnlock();
+  ensureNotifyAudio();
 
   socket = new WebSocket(`${wsBase()}/ws?token=${encodeURIComponent(auth.token)}`);
 
@@ -39,7 +92,14 @@ export function connectRealtime() {
     } catch {
       return;
     }
-    playNotificationSound();
+    // Звук только другим участникам — инициатор действия уже в курсе
+    const me = auth.user?.id;
+    const actorId = data?.actor_id;
+    const isActor =
+      me != null && actorId != null && Number(actorId) === Number(me);
+    if (!isActor) {
+      playNotificationSound();
+    }
     listeners.forEach((cb) => cb(data));
   };
 

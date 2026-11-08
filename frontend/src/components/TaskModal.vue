@@ -1,6 +1,7 @@
 <template>
   <div class="overlay" @click.self="$emit('close')">
-    <div class="modal" v-if="task">
+    <div class="modal" v-if="task" :class="{ 'modal-mail': activeTab === 'email' }">
+      <div class="modal-main">
       <div class="modal-header">
         <h2>{{ task.title }}</h2>
         <div class="header-actions">
@@ -185,7 +186,7 @@
           <p v-if="timelineEvents.length === 0" class="muted">Событий пока нет</p>
         </div>
 
-        <div v-if="activeTab === 'email'" class="email-panel">
+        <div v-if="activeTab === 'email'" class="email-panel email-panel--hints">
           <p v-if="!task.client" class="result-hint">
             К задаче не привязан клиент — укажите получателя вручную. История переписки с клиентом
             появится после привязки.
@@ -193,69 +194,172 @@
           <p v-else-if="!task.client.email" class="result-hint">
             У клиента «{{ task.client.name }}» не указан email — заполните карточку клиента.
           </p>
-
-          <div class="mail-thread">
-            <div class="section-title">Переписка по задаче</div>
-            <MailLoading v-if="mailThreadLoading" />
-            <template v-else>
-              <div
-                v-for="m in mailThread"
-                :key="m.id"
-                class="mail-bubble"
-                :class="m.direction"
-              >
-                <div class="mail-meta">
-                  <strong>{{ m.direction === 'inbound' ? 'Клиент' : (m.actor?.full_name || 'Исходящее') }}</strong>
-                  <span class="muted">{{ formatDate(m.created_at) }}</span>
-                </div>
-                <div class="mail-subject">{{ m.subject || "Без темы" }}</div>
-                <div class="mail-from muted small">
-                  {{ m.direction === 'inbound' ? `От: ${m.from_addr}` : `Кому: ${(m.to_addrs || []).join(", ")}` }}
-                </div>
-                <MailBody :body="m.body" />
-              </div>
-              <p v-if="mailThread.length === 0" class="muted">Писем по этой задаче пока нет</p>
-            </template>
-          </div>
-
           <p v-if="!emailConfigured" class="result-hint">
             Почтовая интеграция не настроена. Администратор может включить её в разделе «Почта».
           </p>
+          <p v-else-if="mailThread.length > 0" class="muted email-side-hint">
+            Переписка справа. Новое письмо — кнопка «Написать письмо».
+          </p>
+          <p v-else class="muted email-side-hint">
+            Переписка справа. Отправьте первое письмо в форме внизу панели.
+          </p>
+        </div>
+      </div>
+      </div>
+
+      <aside v-if="activeTab === 'email'" class="mail-sidebar">
+        <div class="mail-sidebar-head">
+          <div>
+            <div class="section-title">Переписка</div>
+            <p class="muted small mail-count" v-if="!mailThreadLoading">
+              {{ mailThread.length ? `${mailThread.length} писем` : "Пока пусто" }}
+            </p>
+          </div>
+          <button
+            v-if="emailConfigured && mailThread.length > 0"
+            type="button"
+            class="btn"
+            @click="openComposeModal"
+          >
+            Написать письмо
+          </button>
+        </div>
+        <div class="mail-thread">
+          <MailLoading v-if="mailThreadLoading" />
           <template v-else>
-            <form class="email-form" @submit.prevent="submitEmail">
-              <label>
-                Кому
-                <input v-model="emailTo" type="text" placeholder="a@x.com, b@y.com" required />
-              </label>
-              <div class="quick-emails" v-if="suggestedEmails.length">
-                <button
-                  v-for="addr in suggestedEmails"
-                  :key="addr"
-                  type="button"
-                  class="chip-btn"
-                  @click="addRecipient(addr)"
-                >
-                  {{ addr }}
-                </button>
+            <div
+              v-for="m in mailThread"
+              :key="m.id"
+              class="mail-bubble"
+              :class="m.direction"
+            >
+              <div class="mail-meta">
+                <strong>{{ m.direction === 'inbound' ? 'Клиент' : (m.actor?.full_name || 'Исходящее') }}</strong>
+                <span class="muted">{{ formatDate(m.created_at) }}</span>
               </div>
-              <label>
-                Копия
-                <input v-model="emailCc" type="text" placeholder="опционально" />
-              </label>
-              <label>
-                Тема
-                <input v-model="emailSubject" type="text" required />
-              </label>
-              <label>
-                Текст
-                <textarea v-model="emailBody" rows="5" required></textarea>
-              </label>
-              <p v-if="emailError" class="error-text">{{ emailError }}</p>
+              <div class="mail-subject">{{ m.subject || "Без темы" }}</div>
+              <div class="mail-from muted small">
+                {{ m.direction === 'inbound' ? `От: ${m.from_addr}` : `Кому: ${(m.to_addrs || []).join(", ")}` }}
+              </div>
+              <MailBody :body="m.body" />
+            </div>
+            <p v-if="mailThread.length === 0" class="muted mail-empty">
+              Писем по этой задаче пока нет
+            </p>
+          </template>
+        </div>
+
+        <!-- Первое письмо: форма сразу внизу панели -->
+        <div
+          v-if="emailConfigured && !mailThreadLoading && mailThread.length === 0"
+          class="mail-compose-inline"
+        >
+          <form class="email-form" @submit.prevent="submitEmail">
+            <label v-if="messageTemplates.length">
+              Шаблон
+              <select
+                :value="selectedTemplateId"
+                @change="applyMessageTemplate(($event.target).value)"
+              >
+                <option value="">Без шаблона</option>
+                <option v-for="tpl in messageTemplates" :key="tpl.id" :value="String(tpl.id)">
+                  {{ tpl.name }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Кому
+              <input v-model="emailTo" type="text" placeholder="a@x.com, b@y.com" required />
+            </label>
+            <div class="quick-emails" v-if="suggestedEmails.length">
+              <button
+                v-for="addr in suggestedEmails"
+                :key="addr"
+                type="button"
+                class="chip-btn"
+                @click="addRecipient(addr)"
+              >
+                {{ addr }}
+              </button>
+            </div>
+            <label>
+              Копия
+              <input v-model="emailCc" type="text" placeholder="опционально" />
+            </label>
+            <label>
+              Тема
+              <input v-model="emailSubject" type="text" required />
+            </label>
+            <label>
+              Текст
+              <textarea v-model="emailBody" class="email-body" rows="4"></textarea>
+            </label>
+            <p v-if="emailError" class="error-text">{{ emailError }}</p>
+            <button class="btn" type="submit" :disabled="emailLoading">
+              {{ emailLoading ? "Отправка..." : "Отправить письмо" }}
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <div
+        v-if="showComposeModal"
+        class="compose-overlay"
+        @click.self="closeComposeModal"
+      >
+        <div class="compose-modal">
+          <div class="compose-modal-head">
+            <h3>Новое письмо</h3>
+            <button type="button" class="close-btn" @click="closeComposeModal" aria-label="Закрыть">×</button>
+          </div>
+          <form class="email-form" @submit.prevent="submitEmail">
+            <label v-if="messageTemplates.length">
+              Шаблон
+              <select
+                :value="selectedTemplateId"
+                @change="applyMessageTemplate(($event.target).value)"
+              >
+                <option value="">Без шаблона</option>
+                <option v-for="tpl in messageTemplates" :key="tpl.id" :value="String(tpl.id)">
+                  {{ tpl.name }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Кому
+              <input v-model="emailTo" type="text" placeholder="a@x.com, b@y.com" required />
+            </label>
+            <div class="quick-emails" v-if="suggestedEmails.length">
+              <button
+                v-for="addr in suggestedEmails"
+                :key="addr"
+                type="button"
+                class="chip-btn"
+                @click="addRecipient(addr)"
+              >
+                {{ addr }}
+              </button>
+            </div>
+            <label>
+              Копия
+              <input v-model="emailCc" type="text" placeholder="опционально" />
+            </label>
+            <label>
+              Тема
+              <input v-model="emailSubject" type="text" required />
+            </label>
+            <label>
+              Текст
+              <textarea v-model="emailBody" class="email-body" rows="8"></textarea>
+            </label>
+            <p v-if="emailError" class="error-text">{{ emailError }}</p>
+            <div class="compose-actions">
               <button class="btn" type="submit" :disabled="emailLoading">
                 {{ emailLoading ? "Отправка..." : "Отправить письмо" }}
               </button>
-            </form>
-          </template>
+              <button type="button" class="btn secondary" @click="closeComposeModal">Отмена</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
@@ -272,6 +376,7 @@ import {
   sendTaskEmail,
   listTaskEmails,
   getEmailStatus,
+  listMessageTemplates,
   deleteTask,
 } from "../api/tasks";
 import { listStages } from "../api/stages";
@@ -307,6 +412,9 @@ const emailLoading = ref(false);
 const emailError = ref("");
 const mailThread = ref([]);
 const mailThreadLoading = ref(false);
+const showComposeModal = ref(false);
+const messageTemplates = ref([]);
+const selectedTemplateId = ref("");
 
 const localStages = ref([]);
 const stages = computed(() => (props.stages?.length ? props.stages : localStages.value));
@@ -337,10 +445,11 @@ const canDelete = computed(() => {
 
 const canChangeStatus = computed(() => {
   if (!task.value) return false;
+  // админ — без ограничений; остальные — постановщик или исполнитель
+  if (auth.user.is_admin) return true;
   const uid = auth.user.id;
   return (
     task.value.creator.id === uid ||
-    auth.user.is_admin ||
     task.value.assignees.some((u) => u.id === uid)
   );
 });
@@ -452,15 +561,72 @@ function addRecipient(addr) {
   }
 }
 
+function emailTemplateContext() {
+  const t = task.value;
+  const client = t?.client;
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    source_title: t?.title || "",
+    source_id: t?.id || "",
+    source_stage: stageLabel(t) || "",
+    client_name: client?.name || "",
+    client_company: client?.company || "",
+    client_id: client?.id || "",
+    client_email: client?.email || "",
+    client_phone: client?.phone || "",
+    notes: client?.notes || "",
+  };
+}
+
+function renderTemplate(tpl, ctx) {
+  let result = tpl || "";
+  for (const [key, value] of Object.entries(ctx)) {
+    result = result.split(`{${key}}`).join(String(value ?? ""));
+  }
+  return result;
+}
+
+function applyMessageTemplate(templateId) {
+  selectedTemplateId.value = templateId === "" || templateId == null ? "" : String(templateId);
+  if (!selectedTemplateId.value) {
+    emailSubject.value = "";
+    emailBody.value = "";
+    return;
+  }
+  const tpl = messageTemplates.value.find((x) => String(x.id) === selectedTemplateId.value);
+  if (!tpl) return;
+  const ctx = emailTemplateContext();
+  emailSubject.value = renderTemplate(tpl.subject_template, ctx);
+  emailBody.value = renderTemplate(tpl.body_template, ctx);
+}
+
 function initEmailDraft() {
   if (!task.value) return;
-  emailSubject.value = `Задача #${task.value.id}: ${task.value.title}`;
-  emailBody.value =
-    `Здравствуйте!\n\nПо задаче «${task.value.title}»:\n` +
-    `${task.value.description || "—"}\n\n` +
-      `Стадия: ${stageLabel(task.value)}\n`;
   const clientEmail = task.value.client?.email || "";
   emailTo.value = clientEmail || suggestedEmails.value[0] || emailTo.value || "";
+  const preferred =
+    messageTemplates.value.find((t) =>
+      (t.subject_template || "").includes("Автоматизация ваших бизнес-процессов")
+    ) || messageTemplates.value[0];
+  if (preferred) {
+    applyMessageTemplate(preferred.id);
+  } else {
+    selectedTemplateId.value = "";
+    emailSubject.value = "";
+    emailBody.value = "";
+  }
+}
+
+function openComposeModal() {
+  initEmailDraft();
+  emailError.value = "";
+  showComposeModal.value = true;
+}
+
+function closeComposeModal() {
+  showComposeModal.value = false;
+  emailError.value = "";
+  selectedTemplateId.value = "";
 }
 
 async function loadMailThread() {
@@ -501,6 +667,13 @@ getEmailStatus()
   })
   .catch(() => {
     emailConfigured.value = false;
+  });
+listMessageTemplates()
+  .then((list) => {
+    messageTemplates.value = list || [];
+  })
+  .catch(() => {
+    messageTemplates.value = [];
   });
 
 watch(
@@ -597,9 +770,10 @@ async function submitEmail() {
       body: emailBody.value,
     });
     emailBody.value = "";
+    closeComposeModal();
     await loadMailThread();
     emit("updated", task.value);
-    activeTab.value = "timeline";
+    activeTab.value = "email";
   } catch (e) {
     emailError.value = e.response?.data?.detail || "Не удалось отправить письмо";
   } finally {
@@ -623,13 +797,37 @@ async function submitEmail() {
 .modal {
   background: var(--surface);
   border-radius: 10px;
-  padding: 28px;
+  padding: 0;
   width: 620px;
   max-height: 88vh;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.modal-main {
+  padding: 28px;
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.modal.modal-mail {
+  width: min(1120px, 96vw);
+  height: 90vh;
+  max-height: 90vh;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.modal.modal-mail .modal-main {
+  flex: 0 0 min(440px, 42%);
+  max-width: 480px;
+  border-right: 1px solid var(--border);
 }
 
 .modal-header {
@@ -1067,12 +1265,18 @@ h2 {
 }
 
 .email-form input,
-.email-form textarea {
+.email-form textarea,
+.email-form select {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
   font-family: inherit;
   font-size: 13px;
+}
+
+.email-form textarea.email-body {
+  height: 250px;
+  resize: vertical;
 }
 
 .quick-emails {
@@ -1094,13 +1298,100 @@ h2 {
   color: var(--primary);
 }
 
+.mail-sidebar {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f7f8fa;
+}
+
+.mail-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.mail-count {
+  margin: 4px 0 0;
+}
+
 .mail-thread {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 16px;
-  max-height: 280px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  padding: 16px 20px;
+  margin: 0;
+}
+
+.mail-empty {
+  margin: 24px 0;
+  text-align: center;
+}
+
+.mail-compose-inline {
+  border-top: 1px solid var(--border);
+  padding: 16px 20px;
+  background: var(--surface);
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+
+.email-side-hint {
+  margin: 0;
+}
+
+.compose-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(9, 30, 66, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  padding: 24px;
+  border-radius: 10px;
+}
+
+.compose-modal {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 20px 24px;
+  width: min(520px, 100%);
+  max-height: 85%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 12px 32px rgba(9, 30, 66, 0.22);
+}
+
+.compose-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compose-modal-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.compose-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .mail-bubble {
@@ -1143,5 +1434,24 @@ h2 {
 
 .email-form .btn {
   align-self: flex-end;
+}
+
+.small {
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .modal.modal-mail {
+    flex-direction: column;
+    height: 92vh;
+  }
+
+  .modal.modal-mail .modal-main {
+    flex: 0 0 auto;
+    max-width: none;
+    max-height: 38%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 </style>
